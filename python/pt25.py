@@ -6,17 +6,17 @@ ADDRESSES = ('A', 'B')
 #DT = 0.5
 POLL_DELAY = 0.001
 CHAR_DELAY = 0.003
+COMMAND_DELAY = 0.1
 
 class pt25:
     def __init__(self, device, baudrate):
         self.port = device
         self.baudrate = baudrate
         self.serial_timeout = SERIAL_TIMEOUT
-        #self.dt = DT
         self.settings = dict()
 
         self.init_serial()
-        #self.next_poll = time.time() + self.dt
+        self.last_command = 0.
 
     def init_serial(self):
         try:
@@ -29,6 +29,26 @@ class pt25:
             print('Failed to open %s (%d): %s' % (self.port, self.baudrate, msg.message))
             exit()
         #self.ser_symbol_duration = 10./float(self.baudrate)
+
+    def set_ccw_limit(self, address, limit):
+        if address in ADDRESSES:
+            self.send(address+'d'+str(int(limit)).zfill(3))
+            time.sleep(POLL_DELAY)
+            self.read()
+            print('Set CCW limit for %s: %d' % (address, limit))
+            return 0
+        else:
+            print('Invalid address: %s' % address)
+
+    def set_cw_limit(self, address, limit):
+        if address in ADDRESSES:
+            self.send(address+'u'+str(int(limit)).zfill(3))
+            time.sleep(POLL_DELAY)
+            self.read()
+            print('Set CW limit for %s: %d' % (address, limit))
+            return 0
+        else:
+            print('Invalid address: %s' % address)
 
     def set(self, address, position):
         if address in ADDRESSES:
@@ -47,7 +67,7 @@ class pt25:
                 print('Position out of bounds: %.3f' % position)
                 return -1
             print('Moving to position %.3f (counts: %d)' % (position, counts))
-            self.send(address+'p'+str(int(counts)))
+            self.send(address+'p'+str(int(counts)).zfill(3))
             time.sleep(POLL_DELAY)
             self.read()
             return 0
@@ -101,23 +121,34 @@ class pt25:
             if data[2] != address:
                 print('Wrong address: %s' % data[2])
                 return -1
-            data_int = int(data[3:])
-            data_deg = 360. * float(data_int - self.settings[address]['factory_ccw_limit']) / float(self.settings[address]['factory_cw_limit'] - self.settings[address]['factory_ccw_limit'])
-            print('Got data: %d  Deg: %.2f  Raw: %s' % (data_int, data_deg, data))
-            return data_deg
+            try:
+                data_int = int(data[3:])
+                data_deg = 360. * float(data_int - self.settings[address]['factory_ccw_limit']) / float(self.settings[address]['factory_cw_limit'] - self.settings[address]['factory_ccw_limit'])
+                #print('Got data: %d  Deg: %.2f  Raw: %s' % (data_int, data_deg, data))
+                return data_deg
+            except:
+                print('Failed to parse %s.' % data[3:])
+                return -1
         else:
             print('Invalid address: %s.' % address)
             return -1
 
     def send(self, tx_str):
-        #print('tx: %s' % tx_str)
+        if time.time() < self.last_command + COMMAND_DELAY:
+            time.sleep(max(0., (self.last_command + COMMAND_DELAY) - time.time()))
+        self.last_command = time.time()
+        print('tx: %s' % tx_str)
         for character in tx_str:
             self.ser.write(character)
             time.sleep(CHAR_DELAY)
 
     def read(self):
-        data = self.ser.readline()
-        self.ser.flush()
+        try:
+            data = self.ser.readline()
+        except:
+            data = ''
+            print('Failed to read from serial.')
+        print('rx: %s' % data)
         return(data)
 
     def spin_once(self):
@@ -144,5 +175,6 @@ if __name__ == '__main__':
     #pt25obj.set('B', 180)
     while True:
         pt25obj.poll('A')
+        pt25obj.poll('B')
         time.sleep(1.0)
         #pt25obj.spin_once()
